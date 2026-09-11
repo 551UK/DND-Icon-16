@@ -18,10 +18,18 @@
 @interface DNDStateService : NSObject
 + (instancetype)serviceForClientIdentifier:(NSString *)identifier;
 - (BOOL)addStateUpdateListener:(id)listener error:(NSError **)error;
+- (void)addStateUpdateListener:(id)listener withCompletionHandler:(id)completion;
 - (DNDState *)queryCurrentStateWithError:(NSError **)error;
+- (void)queryCurrentStateWithCompletionHandler:(id)completion;
 @end
 
-@interface SBIconController : UIViewController
+@interface SBIconController : NSObject
+@end
+
+@interface SBRootFolderController : UIViewController
+@end
+
+@interface SBRootFolderView : UIView
 @end
 
 @interface SBUIProudLockIconView : UIView
@@ -37,7 +45,7 @@ static CGFloat DNDIYOffset = 0.0;
 static UIColor *DNDIColor = nil;
 
 static BOOL DNDIDoNotDisturbActive = NO;
-static UIView *DNDIHomeRootView = nil;
+static __weak UIView *DNDIHomeRootView = nil;
 static UIImageView *DNDIIconView = nil;
 static CGPoint DNDILockAnchor = {0.0, 0.0};
 static BOOL DNDIHasLockAnchor = NO;
@@ -56,21 +64,16 @@ static CGFloat DNDIClampOffset(CGFloat value) {
 }
 
 static UIColor *DNDIColorFromHexString(NSString *string) {
-    if (![string isKindOfClass:[NSString class]]) {
-        return [UIColor colorWithRed:0.494 green:0.341 blue:0.761 alpha:1.0];
-    }
+    UIColor *fallback = [UIColor colorWithRed:0.494 green:0.341 blue:0.761 alpha:1.0];
+    if (![string isKindOfClass:[NSString class]]) return fallback;
 
     NSString *hex = [[string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] uppercaseString];
     if ([hex hasPrefix:@"#"]) hex = [hex substringFromIndex:1];
-    if (hex.length != 6) {
-        return [UIColor colorWithRed:0.494 green:0.341 blue:0.761 alpha:1.0];
-    }
+    if (hex.length != 6) return fallback;
 
     unsigned int rgb = 0;
     NSScanner *scanner = [NSScanner scannerWithString:hex];
-    if (![scanner scanHexInt:&rgb]) {
-        return [UIColor colorWithRed:0.494 green:0.341 blue:0.761 alpha:1.0];
-    }
+    if (![scanner scanHexInt:&rgb]) return fallback;
 
     return [UIColor colorWithRed:((rgb >> 16) & 0xFF) / 255.0
                            green:((rgb >> 8) & 0xFF) / 255.0
@@ -105,29 +108,23 @@ static UIImage *DNDITemplateImage(void) {
 
 static CGPoint DNDIDefaultAnchorForView(UIView *view) {
     CGFloat width = CGRectGetWidth(view.bounds);
-    CGFloat topInset = 0.0;
-
-    if (view.window) {
-        topInset = view.window.safeAreaInsets.top;
-    } else {
-        topInset = view.safeAreaInsets.top;
-    }
-
+    CGFloat topInset = view.window ? view.window.safeAreaInsets.top : view.safeAreaInsets.top;
     CGFloat y = topInset > 24.0 ? topInset + 5.0 : 30.0;
     return CGPointMake(width * 0.5, y);
 }
 
 static void DNDIUpdateOverlay(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!DNDIIconView || !DNDIHomeRootView) return;
+        UIView *homeRootView = DNDIHomeRootView;
+        if (!DNDIIconView || !homeRootView) return;
 
         DNDIIconView.hidden = !(DNDIEnabled && DNDIDoNotDisturbActive);
         DNDIIconView.alpha = 1.0;
         DNDIIconView.tintColor = DNDIColor ?: UIColor.whiteColor;
 
-        CGPoint anchor = DNDIHasLockAnchor ? DNDILockAnchor : DNDIDefaultAnchorForView(DNDIHomeRootView);
+        CGPoint anchor = DNDIHasLockAnchor ? DNDILockAnchor : DNDIDefaultAnchorForView(homeRootView);
         if (DNDIHasLockAnchor) {
-            anchor = [DNDIHomeRootView convertPoint:anchor fromView:nil];
+            anchor = [homeRootView convertPoint:anchor fromView:nil];
         }
 
         anchor.x += DNDIXOffset;
@@ -136,8 +133,8 @@ static void DNDIUpdateOverlay(void) {
         DNDIIconView.bounds = CGRectMake(0.0, 0.0, 44.0, 44.0);
         DNDIIconView.center = anchor;
 
-        if (DNDIIconView.superview == DNDIHomeRootView) {
-            [DNDIHomeRootView bringSubviewToFront:DNDIIconView];
+        if (DNDIIconView.superview == homeRootView) {
+            [homeRootView bringSubviewToFront:DNDIIconView];
         }
     });
 }
@@ -184,6 +181,7 @@ static void DNDIApplyState(DNDState *state) {
 @property (nonatomic, strong) DNDStateService *service;
 + (instancetype)sharedMonitor;
 - (void)start;
+- (void)refreshNow;
 @end
 
 @implementation DNDIcon16StateMonitor
@@ -198,35 +196,50 @@ static void DNDIApplyState(DNDState *state) {
 }
 
 - (void)start {
-    if (self.service) return;
+    if (self.service) {
+        [self refreshNow];
+        return;
+    }
 
     dlopen("/System/Library/PrivateFrameworks/DoNotDisturb.framework/DoNotDisturb", RTLD_LAZY);
 
     Class serviceClass = NSClassFromString(@"DNDStateService");
-    if (!serviceClass || ![serviceClass respondsToSelector:@selector(serviceForClientIdentifier:)]) {
+    if (!serviceClass || ![serviceClass respondsToSelector:@selector(serviceForClientIdentifier:)]) return;
+
+    // SpringBoard itself uses this client identifier for its icon-controller DND state service.
+    self.service = [serviceClass serviceForClientIdentifier:@"com.apple.springboard.SBIconController"];
+    if (!self.service) return;
+
+    if ([self.service respondsToSelector:@selector(addStateUpdateListener:withCompletionHandler:)]) {
+        [self.service addStateUpdateListener:self withCompletionHandler:nil];
+    } else if ([self.service respondsToSelector:@selector(addStateUpdateListener:error:)]) {
+        [self.service addStateUpdateListener:self error:NULL];
+    }
+
+    [self refreshNow];
+}
+
+- (void)refreshNow {
+    if (!self.service) return;
+
+    if ([self.service respondsToSelector:@selector(queryCurrentStateWithError:)]) {
+        DNDState *state = [self.service queryCurrentStateWithError:NULL];
+        if (state) DNDIApplyState(state);
         return;
     }
 
-    self.service = [serviceClass serviceForClientIdentifier:@"com.551.dndicon16"];
-    if (!self.service) return;
-
-    if ([self.service respondsToSelector:@selector(addStateUpdateListener:error:)]) {
-        NSError *listenerError = nil;
-        [self.service addStateUpdateListener:self error:&listenerError];
-    }
-
-    if ([self.service respondsToSelector:@selector(queryCurrentStateWithError:)]) {
-        NSError *stateError = nil;
-        DNDState *state = [self.service queryCurrentStateWithError:&stateError];
-        if (state) DNDIApplyState(state);
+    if ([self.service respondsToSelector:@selector(queryCurrentStateWithCompletionHandler:)]) {
+        [self.service queryCurrentStateWithCompletionHandler:^(DNDState *state, NSError *error) {
+            (void)error;
+            if (state) DNDIApplyState(state);
+        }];
     }
 }
 
 - (void)stateService:(DNDStateService *)service didReceiveDoNotDisturbStateUpdate:(DNDStateUpdate *)update {
     (void)service;
-    if (update.state) {
-        DNDIApplyState(update.state);
-    }
+    DNDState *state = update.state;
+    if (state) DNDIApplyState(state);
 }
 
 @end
@@ -263,7 +276,6 @@ static void DNDICaptureLockAnchor(SBUIProudLockIconView *root) {
 
     CGPoint center = CGPointMake(CGRectGetMidX(glyph.bounds), CGRectGetMidY(glyph.bounds));
     CGPoint point = [glyph convertPoint:center toView:nil];
-
     if (!isfinite(point.x) || !isfinite(point.y)) return;
 
     DNDILockAnchor = point;
@@ -271,21 +283,56 @@ static void DNDICaptureLockAnchor(SBUIProudLockIconView *root) {
     DNDIUpdateOverlay();
 }
 
+// SBIconController is an NSObject, not a view controller. v1.0.0 incorrectly
+// tried to attach the overlay through view-controller callbacks on this class.
+// We still hook its native DND update callback as an extra live-state source.
 %hook SBIconController
+
+- (void)stateService:(DNDStateService *)service didReceiveDoNotDisturbStateUpdate:(DNDStateUpdate *)update {
+    %orig;
+    DNDState *state = update.state;
+    if (state) DNDIApplyState(state);
+}
+
+%end
+
+// The root folder controller/view are the real Home Screen view hierarchy.
+%hook SBRootFolderController
 
 - (void)viewDidLoad {
     %orig;
     DNDIEnsureOverlay(self.view);
+    [[DNDIcon16StateMonitor sharedMonitor] refreshNow];
 }
 
-- (void)viewWillAppear:(BOOL)animated {
+- (void)viewDidAppear:(BOOL)animated {
     %orig(animated);
     DNDIEnsureOverlay(self.view);
+    [[DNDIcon16StateMonitor sharedMonitor] refreshNow];
 }
 
 - (void)viewDidLayoutSubviews {
     %orig;
     DNDIEnsureOverlay(self.view);
+}
+
+%end
+
+// Direct view hook as a fallback for iOS 16 builds where the controller's
+// lifecycle callbacks differ.
+%hook SBRootFolderView
+
+- (void)didMoveToWindow {
+    %orig;
+    if (self.window) {
+        DNDIEnsureOverlay(self);
+        [[DNDIcon16StateMonitor sharedMonitor] refreshNow];
+    }
+}
+
+- (void)layoutSubviews {
+    %orig;
+    if (self.window) DNDIEnsureOverlay(self);
 }
 
 %end
@@ -298,9 +345,7 @@ static void DNDICaptureLockAnchor(SBUIProudLockIconView *root) {
     __weak SBUIProudLockIconView *weakSelf = self;
     dispatch_async(dispatch_get_main_queue(), ^{
         SBUIProudLockIconView *strongSelf = weakSelf;
-        if (strongSelf) {
-            DNDICaptureLockAnchor(strongSelf);
-        }
+        if (strongSelf) DNDICaptureLockAnchor(strongSelf);
     });
 }
 
