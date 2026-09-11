@@ -1,3 +1,4 @@
+# Builds, validates and publishes the rootless DND Icon 16 package.
 name: Build rootless DEB
 
 on:
