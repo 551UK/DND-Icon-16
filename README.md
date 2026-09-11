@@ -1,18 +1,15 @@
 # DND Icon 16
 
-A rootless iOS 16 tweak for Dopamine that shows a custom moon/cloud/stars symbol on the Home Screen only while the standard **Do Not Disturb** Focus is enabled.
+Shows a custom moon, cloud and stars icon on your Home Screen whenever **Do Not Disturb** is turned on.
 
 ## Features
 
-- Uses the supplied moon/cloud/stars artwork.
-- Shows only while **Do Not Disturb** (`com.apple.donotdisturb.mode.default`) is active.
-- Home Screen only — it lives inside SpringBoard's icon controller, so apps and the Lock Screen cover it normally.
-- Automatically learns the real `SBUIProudLockIconView` screen position used by LatchKey/native Face ID and uses that as its default position.
-- Adjustable X/Y offsets.
-- Fully changeable symbol colour.
-- Enable/disable switch.
-- Reset position button.
-- Respring button.
-- GitHub link in Settings.
+- Only shows on the Home Screen while Do Not Disturb is on.
+- Change the icon colour.
+- Move the icon left, right, up or down.
+- Enable or disable the tweak.
+- Reset the colour or position.
+- Uses the same default position as the LatchKey lock animation.
+- No respring needed for normal changes — just turn Do Not Disturb off and back on once.
 
-Designed for rootless iOS 16 / Dopamine.
+Made for rootless iOS 16 on Dopamine.
