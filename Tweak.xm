@@ -124,7 +124,6 @@ static id DNDIObjectForKey(id object, NSString *key) {
 static UIView *DNDIHomeContainerForController(SBIconController *controller) {
     if (!controller) return nil;
 
-    // Prefer the actual Home Screen VC so the icon naturally disappears behind apps.
     id homeVC = DNDIObjectForKey(controller, @"homeScreenViewController");
     UIView *view = DNDIViewForKey(homeVC, @"view");
     if (view.window) return view;
@@ -142,7 +141,6 @@ static UIView *DNDIHomeContainerForController(SBIconController *controller) {
         }
     }
 
-    // RootFolderController's contentView is preferable to loading an unrelated view.
     view = DNDIViewForKey(rootFolder, @"contentView");
     if (view.window) return view;
 
@@ -305,8 +303,6 @@ static void DNDICaptureLockAnchor(SBUIProudLockIconView *root) {
 
 %hook SBIconController
 
-// This is SpringBoard's own iOS 16 DND listener callback. Using its supplied
-// DNDStateUpdate avoids creating a second private-framework listener.
 - (void)stateService:(id)service didReceiveDoNotDisturbStateUpdate:(DNDStateUpdate *)update {
     %orig;
 
@@ -382,12 +378,11 @@ static void DNDIRefreshSharedController(void) {
                                         NULL,
                                         CFNotificationSuspensionBehaviorDeliverImmediately);
 
-        // Small one-shot retries only. No layoutSubviews hooks and no repeating timer.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), DNDIRefreshSharedController);
+                       dispatch_get_main_queue(), ^{ DNDIRefreshSharedController(); });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), DNDIRefreshSharedController);
+                       dispatch_get_main_queue(), ^{ DNDIRefreshSharedController(); });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6.0 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), DNDIRefreshSharedController);
+                       dispatch_get_main_queue(), ^{ DNDIRefreshSharedController(); });
     }
 }
