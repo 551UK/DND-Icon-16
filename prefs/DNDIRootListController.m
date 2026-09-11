@@ -90,6 +90,10 @@ static NSString *DNDIHexStringFromColor(UIColor *color) {
                                             defaultValue:@YES
                                                     cell:PSSwitchCell]];
 
+    PSSpecifier *applyGroup = [PSSpecifier groupSpecifierWithName:@"Applying Changes"];
+    [applyGroup setProperty:@"After changing any settings, turn Do Not Disturb OFF and back ON once to lock in the new settings. You do not need to respring." forKey:@"footerText"];
+    [specifiers addObject:applyGroup];
+
     PSSpecifier *appearanceGroup = [PSSpecifier groupSpecifierWithName:@"Appearance"];
     [appearanceGroup setProperty:@"Choose the colour used for the moon, stars and cloud." forKey:@"footerText"];
     [specifiers addObject:appearanceGroup];
@@ -149,7 +153,9 @@ static NSString *DNDIHexStringFromColor(UIColor *color) {
     [resetPosition setProperty:NSStringFromSelector(@selector(resetPosition)) forKey:@"action"];
     [specifiers addObject:resetPosition];
 
-    [specifiers addObject:[PSSpecifier groupSpecifierWithName:@"Actions"]];
+    PSSpecifier *actionsGroup = [PSSpecifier groupSpecifierWithName:@"Actions"];
+    [actionsGroup setProperty:@"A respring is not needed for normal setting changes. The button is kept here for troubleshooting." forKey:@"footerText"];
+    [specifiers addObject:actionsGroup];
 
     PSSpecifier *respring = [PSSpecifier preferenceSpecifierNamed:@"Respring"
                                                             target:self
