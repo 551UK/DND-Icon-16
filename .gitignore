@@ -1,3 +1,4 @@
+# Theos build output and local macOS files
 packages/
 .theos/
 .DS_Store
