@@ -1,6 +1,6 @@
 # DND Icon 16
 
-Shows a custom moon, cloud and stars icon on your Home Screen whenever **Do Not Disturb** is turned on.
+DND Icon 16 shows a custom moon, cloud and stars icon on your Home Screen whenever **Do Not Disturb** is turned on.
 
 ## Features
 
