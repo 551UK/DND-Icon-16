@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>entry</key>
+    <dict>
+        <key>bundle</key>
+        <string>DNDIcon16Prefs</string>
+        <key>bundlePath</key>
+        <string>/var/jb/Library/PreferenceBundles/DNDIcon16Prefs.bundle</string>
+        <key>cell</key>
+        <string>PSLinkCell</string>
+        <key>detail</key>
+        <string>DNDIRootListController</string>
+        <key>icon</key>
+        <string>DNDIcon16.png</string>
+        <key>isController</key>
+        <true/>
+        <key>label</key>
+        <string>DND Icon 16</string>
+    </dict>
+</dict>
+</plist>

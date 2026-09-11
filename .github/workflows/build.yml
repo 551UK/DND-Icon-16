@@ -1,0 +1,92 @@
+name: Build rootless DEB
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dnd-icon-16-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Theos
+        uses: Randomblock1/theos-action@v1
+        with:
+          theos-sdks: https://github.com/theos/sdks
+          theos-sdks-branch: master
+
+      - name: Build rootless package
+        run: |
+          chmod 755 layout/DEBIAN/postinst
+          make clean package FINALPACKAGE=1
+
+      - name: Validate package
+        run: |
+          set -euo pipefail
+          brew install dpkg
+          debs=(packages/*.deb)
+          test "${#debs[@]}" -eq 1
+          test "$(dpkg-deb -f "${debs[0]}" Architecture)" = iphoneos-arm64
+          test "$(dpkg-deb -f "${debs[0]}" Package)" = com.551.dndicon16
+          dpkg-deb -x "${debs[0]}" "$RUNNER_TEMP/dndicon-check"
+
+          binary="$RUNNER_TEMP/dndicon-check/var/jb/Library/MobileSubstrate/DynamicLibraries/DNDIcon16.dylib"
+          prefs="$RUNNER_TEMP/dndicon-check/var/jb/Library/PreferenceBundles/DNDIcon16Prefs.bundle"
+          entries="$RUNNER_TEMP/dndicon-check/var/jb/Library/PreferenceLoader/Preferences"
+          symbol="$RUNNER_TEMP/dndicon-check/var/jb/Library/Application Support/DNDIcon16/DNDIconTemplate.png"
+
+          test -s "$binary"
+          test -s "$symbol"
+          xcrun lipo "$binary" -verify_arch arm64 arm64e
+          xcrun lipo "$prefs/DNDIcon16Prefs" -verify_arch arm64 arm64e
+          plutil -lint "$prefs/Info.plist"
+          plutil -lint "$entries/DNDIcon16.plist"
+
+          suffixes=('' '@2x' '@3x')
+          sizes=(29 58 87)
+          for i in 0 1 2; do
+            suffix="${suffixes[$i]}"
+            size="${sizes[$i]}"
+            for icon in "$entries/DNDIcon16${suffix}.png" "$prefs/DNDIcon16${suffix}.png" "$prefs/icon${suffix}.png"; do
+              test -s "$icon"
+              test "$(sips -g pixelWidth "$icon" | awk '/pixelWidth/{print $2}')" = "$size"
+              test "$(sips -g pixelHeight "$icon" | awk '/pixelHeight/{print $2}')" = "$size"
+            done
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DNDIcon16-rootless
+          path: packages/*.deb
+          if-no-files-found: error
+
+      - name: Publish latest DEB only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^Version: //p' control)"
+          current="v${version}"
+
+          if gh release view "$current" >/dev/null 2>&1; then
+            gh release upload "$current" packages/*.deb --clobber
+          else
+            gh release create "$current" packages/*.deb \
+              --target "$GITHUB_SHA" \
+              --title "DND Icon 16 ${version}" \
+              --notes "Rootless iOS 16 Dopamine build."
+          fi
+
+          gh release list --limit 100 --json tagName --jq '.[].tagName' | while read -r tag; do
+            [ "$tag" = "$current" ] && continue
+            gh release delete "$tag" --cleanup-tag -y
+          done

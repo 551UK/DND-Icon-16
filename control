@@ -1,0 +1,10 @@
+Package: com.551.dndicon16
+Name: DND Icon 16
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Shows a customisable moon-and-cloud Do Not Disturb symbol on the Home Screen only while the built-in Do Not Disturb Focus is enabled. Includes colour and position controls.
+Maintainer: 551
+Author: 551
+Section: Tweaks
+Depends: mobilesubstrate, preferenceloader, firmware (>= 16.0), firmware (<< 17.0)
+Homepage: https://github.com/551UK/DND-Icon-16
