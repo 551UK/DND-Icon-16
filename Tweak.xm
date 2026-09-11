@@ -10,6 +10,10 @@
 @property (nonatomic, readonly, copy) NSArray *activeModeIdentifiers;
 @end
 
+@interface DNDStateUpdate : NSObject
+@property (nonatomic, readonly, copy) DNDState *state;
+@end
+
 @interface DNDStateService : NSObject
 - (DNDState *)queryCurrentStateWithError:(NSError **)error;
 @end
@@ -17,6 +21,9 @@
 @interface SBIconController : NSObject
 + (instancetype)sharedInstance;
 - (id)_rootFolderController;
+- (id)homeScreenViewController;
+- (id)rootViewController;
+- (UIView *)contentView;
 - (DNDStateService *)dndStateService;
 - (void)updateRootFolderWithCurrentDoNotDisturbState;
 @end
@@ -34,7 +41,7 @@ static CGFloat DNDIYOffset = 0.0;
 static UIColor *DNDIColor = nil;
 
 static BOOL DNDIDoNotDisturbActive = NO;
-static __weak UIView *DNDIHomeRootView = nil;
+static __weak UIView *DNDIHomeContainer = nil;
 static UIImageView *DNDIIconView = nil;
 static CGPoint DNDILockAnchor = {0.0, 0.0};
 static BOOL DNDIHasLockAnchor = NO;
@@ -90,9 +97,68 @@ static UIImage *DNDITemplateImage(void) {
     dispatch_once(&onceToken, ^{
         NSString *path = @"/var/jb/Library/Application Support/DNDIcon16/DNDIconTemplate.png";
         UIImage *loaded = [UIImage imageWithContentsOfFile:path];
-        image = [loaded imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+        if (loaded) image = [loaded imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
     });
     return image;
+}
+
+static UIView *DNDIViewForKey(id object, NSString *key) {
+    if (!object) return nil;
+    @try {
+        id value = [object valueForKey:key];
+        return [value isKindOfClass:[UIView class]] ? value : nil;
+    } @catch (__unused NSException *exception) {
+        return nil;
+    }
+}
+
+static id DNDIObjectForKey(id object, NSString *key) {
+    if (!object) return nil;
+    @try {
+        return [object valueForKey:key];
+    } @catch (__unused NSException *exception) {
+        return nil;
+    }
+}
+
+static UIView *DNDIHomeContainerForController(SBIconController *controller) {
+    if (!controller) return nil;
+
+    // Prefer the actual Home Screen VC so the icon naturally disappears behind apps.
+    id homeVC = DNDIObjectForKey(controller, @"homeScreenViewController");
+    UIView *view = DNDIViewForKey(homeVC, @"view");
+    if (view.window) return view;
+
+    id rootVC = DNDIObjectForKey(controller, @"rootViewController");
+    view = DNDIViewForKey(rootVC, @"view");
+    if (view.window) return view;
+
+    id rootFolder = nil;
+    if ([controller respondsToSelector:@selector(_rootFolderController)]) {
+        @try {
+            rootFolder = [controller _rootFolderController];
+        } @catch (__unused NSException *exception) {
+            rootFolder = nil;
+        }
+    }
+
+    // RootFolderController's contentView is preferable to loading an unrelated view.
+    view = DNDIViewForKey(rootFolder, @"contentView");
+    if (view.window) return view;
+
+    view = DNDIViewForKey(rootFolder, @"view");
+    if (view.window) return view;
+
+    if ([controller respondsToSelector:@selector(contentView)]) {
+        @try {
+            view = [controller contentView];
+        } @catch (__unused NSException *exception) {
+            view = nil;
+        }
+        if ([view isKindOfClass:[UIView class]] && view.window) return view;
+    }
+
+    return nil;
 }
 
 static CGPoint DNDIDefaultAnchorForView(UIView *view) {
@@ -104,16 +170,16 @@ static CGPoint DNDIDefaultAnchorForView(UIView *view) {
 
 static void DNDIUpdateOverlay(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIView *homeRootView = DNDIHomeRootView;
-        if (!DNDIIconView || !homeRootView) return;
+        UIView *container = DNDIHomeContainer;
+        if (!DNDIIconView || !container) return;
 
         DNDIIconView.hidden = !(DNDIEnabled && DNDIDoNotDisturbActive);
         DNDIIconView.alpha = 1.0;
         DNDIIconView.tintColor = DNDIColor ?: UIColor.whiteColor;
 
-        CGPoint anchor = DNDIHasLockAnchor ? DNDILockAnchor : DNDIDefaultAnchorForView(homeRootView);
+        CGPoint anchor = DNDIHasLockAnchor ? DNDILockAnchor : DNDIDefaultAnchorForView(container);
         if (DNDIHasLockAnchor) {
-            anchor = [homeRootView convertPoint:anchor fromView:nil];
+            anchor = [container convertPoint:anchor fromView:nil];
         }
 
         anchor.x += DNDIXOffset;
@@ -121,29 +187,34 @@ static void DNDIUpdateOverlay(void) {
 
         DNDIIconView.bounds = CGRectMake(0.0, 0.0, 44.0, 44.0);
         DNDIIconView.center = anchor;
+        DNDIIconView.layer.zPosition = 100000.0;
+
+        if (DNDIIconView.superview == container) {
+            [container bringSubviewToFront:DNDIIconView];
+        }
     });
 }
 
-static void DNDIEnsureOverlay(UIView *homeRootView) {
-    if (!homeRootView) return;
+static void DNDIEnsureOverlay(UIView *container) {
+    if (!container || !container.window) return;
 
-    DNDIHomeRootView = homeRootView;
+    DNDIHomeContainer = container;
 
     if (!DNDIIconView) {
-        UIImage *templateImage = DNDITemplateImage();
-        if (!templateImage) return;
+        UIImage *symbolImage = DNDITemplateImage();
+        if (!symbolImage) return;
 
-        DNDIIconView = [[UIImageView alloc] initWithImage:templateImage];
+        DNDIIconView = [[UIImageView alloc] initWithImage:symbolImage];
         DNDIIconView.contentMode = UIViewContentModeScaleAspectFit;
         DNDIIconView.userInteractionEnabled = NO;
         DNDIIconView.backgroundColor = UIColor.clearColor;
         DNDIIconView.accessibilityIdentifier = @"DNDIcon16Symbol";
-        DNDIIconView.layer.zPosition = 10000.0;
+        DNDIIconView.hidden = YES;
     }
 
-    if (DNDIIconView.superview != homeRootView) {
+    if (DNDIIconView.superview != container) {
         [DNDIIconView removeFromSuperview];
-        [homeRootView addSubview:DNDIIconView];
+        [container addSubview:DNDIIconView];
     }
 
     DNDIUpdateOverlay();
@@ -171,27 +242,6 @@ static void DNDIApplyState(DNDState *state) {
     DNDIUpdateOverlay();
 }
 
-static UIView *DNDIRootViewFromIconController(SBIconController *controller) {
-    if (!controller || ![controller respondsToSelector:@selector(_rootFolderController)]) return nil;
-
-    id rootController = nil;
-    @try {
-        rootController = [controller _rootFolderController];
-    } @catch (__unused NSException *exception) {
-        return nil;
-    }
-
-    if (!rootController || ![rootController respondsToSelector:@selector(view)]) return nil;
-
-    UIView *view = nil;
-    @try {
-        view = [rootController view];
-    } @catch (__unused NSException *exception) {
-        return nil;
-    }
-    return [view isKindOfClass:[UIView class]] ? view : nil;
-}
-
 static DNDStateService *DNDIStateServiceFromIconController(SBIconController *controller) {
     if (!controller) return nil;
 
@@ -215,8 +265,8 @@ static void DNDIRefreshFromIconController(SBIconController *controller) {
     if (!controller) return;
 
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIView *rootView = DNDIRootViewFromIconController(controller);
-        if (rootView) DNDIEnsureOverlay(rootView);
+        UIView *container = DNDIHomeContainerForController(controller);
+        if (container) DNDIEnsureOverlay(container);
 
         DNDStateService *service = DNDIStateServiceFromIconController(controller);
         if (service && [service respondsToSelector:@selector(queryCurrentStateWithError:)]) {
@@ -253,10 +303,24 @@ static void DNDICaptureLockAnchor(SBUIProudLockIconView *root) {
     DNDIUpdateOverlay();
 }
 
-// Use SpringBoard's own DND refresh path. This avoids registering a second
-// DND service and avoids hooking SBRootFolderView/layoutSubviews, which caused
-// the SpringBoard crash in 1.0.1.
 %hook SBIconController
+
+// This is SpringBoard's own iOS 16 DND listener callback. Using its supplied
+// DNDStateUpdate avoids creating a second private-framework listener.
+- (void)stateService:(id)service didReceiveDoNotDisturbStateUpdate:(DNDStateUpdate *)update {
+    %orig;
+
+    UIView *container = DNDIHomeContainerForController(self);
+    if (container) DNDIEnsureOverlay(container);
+
+    DNDState *state = nil;
+    if ([update respondsToSelector:@selector(state)]) state = update.state;
+    if (state) {
+        DNDIApplyState(state);
+    } else {
+        DNDIRefreshFromIconController(self);
+    }
+}
 
 - (void)updateRootFolderWithCurrentDoNotDisturbState {
     %orig;
@@ -294,6 +358,19 @@ static void DNDIPreferencesChanged(CFNotificationCenterRef center,
     DNDIUpdateOverlay();
 }
 
+static void DNDIRefreshSharedController(void) {
+    Class cls = NSClassFromString(@"SBIconController");
+    if (!cls || ![cls respondsToSelector:@selector(sharedInstance)]) return;
+
+    SBIconController *controller = nil;
+    @try {
+        controller = [cls sharedInstance];
+    } @catch (__unused NSException *exception) {
+        controller = nil;
+    }
+    if (controller) DNDIRefreshFromIconController(controller);
+}
+
 %ctor {
     @autoreleasepool {
         DNDILoadPrefs();
@@ -305,15 +382,12 @@ static void DNDIPreferencesChanged(CFNotificationCenterRef center,
                                         NULL,
                                         CFNotificationSuspensionBehaviorDeliverImmediately);
 
-        // A short delayed refresh handles SpringBoard launches where the root
-        // folder controller is created just after tweak injection.
+        // Small one-shot retries only. No layoutSubviews hooks and no repeating timer.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            Class cls = NSClassFromString(@"SBIconController");
-            if (cls && [cls respondsToSelector:@selector(sharedInstance)]) {
-                SBIconController *controller = [cls sharedInstance];
-                DNDIRefreshFromIconController(controller);
-            }
-        });
+                       dispatch_get_main_queue(), DNDIRefreshSharedController);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), DNDIRefreshSharedController);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), DNDIRefreshSharedController);
     }
 }
