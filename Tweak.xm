@@ -130,10 +130,10 @@ static void DNDIEnsureOverlay(UIView *homeRootView) {
     DNDIHomeRootView = homeRootView;
 
     if (!DNDIIconView) {
-        UIImage *template = DNDITemplateImage();
-        if (!template) return;
+        UIImage *templateImage = DNDITemplateImage();
+        if (!templateImage) return;
 
-        DNDIIconView = [[UIImageView alloc] initWithImage:template];
+        DNDIIconView = [[UIImageView alloc] initWithImage:templateImage];
         DNDIIconView.contentMode = UIViewContentModeScaleAspectFit;
         DNDIIconView.userInteractionEnabled = NO;
         DNDIIconView.backgroundColor = UIColor.clearColor;
