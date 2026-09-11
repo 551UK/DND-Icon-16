@@ -2,7 +2,6 @@
 #import <Foundation/Foundation.h>
 #import <CoreFoundation/CoreFoundation.h>
 #import <objc/runtime.h>
-#import <dlfcn.h>
 #import <math.h>
 
 @interface DNDState : NSObject
@@ -11,25 +10,15 @@
 @property (nonatomic, readonly, copy) NSArray *activeModeIdentifiers;
 @end
 
-@interface DNDStateUpdate : NSObject
-@property (nonatomic, readonly, copy) DNDState *state;
-@end
-
 @interface DNDStateService : NSObject
-+ (instancetype)serviceForClientIdentifier:(NSString *)identifier;
-- (BOOL)addStateUpdateListener:(id)listener error:(NSError **)error;
-- (void)addStateUpdateListener:(id)listener withCompletionHandler:(id)completion;
 - (DNDState *)queryCurrentStateWithError:(NSError **)error;
-- (void)queryCurrentStateWithCompletionHandler:(id)completion;
 @end
 
 @interface SBIconController : NSObject
-@end
-
-@interface SBRootFolderController : UIViewController
-@end
-
-@interface SBRootFolderView : UIView
++ (instancetype)sharedInstance;
+- (id)_rootFolderController;
+- (DNDStateService *)dndStateService;
+- (void)updateRootFolderWithCurrentDoNotDisturbState;
 @end
 
 @interface SBUIProudLockIconView : UIView
@@ -132,10 +121,6 @@ static void DNDIUpdateOverlay(void) {
 
         DNDIIconView.bounds = CGRectMake(0.0, 0.0, 44.0, 44.0);
         DNDIIconView.center = anchor;
-
-        if (DNDIIconView.superview == homeRootView) {
-            [homeRootView bringSubviewToFront:DNDIIconView];
-        }
     });
 }
 
@@ -145,7 +130,10 @@ static void DNDIEnsureOverlay(UIView *homeRootView) {
     DNDIHomeRootView = homeRootView;
 
     if (!DNDIIconView) {
-        DNDIIconView = [[UIImageView alloc] initWithImage:DNDITemplateImage()];
+        UIImage *template = DNDITemplateImage();
+        if (!template) return;
+
+        DNDIIconView = [[UIImageView alloc] initWithImage:template];
         DNDIIconView.contentMode = UIViewContentModeScaleAspectFit;
         DNDIIconView.userInteractionEnabled = NO;
         DNDIIconView.backgroundColor = UIColor.clearColor;
@@ -164,10 +152,16 @@ static void DNDIEnsureOverlay(UIView *homeRootView) {
 static BOOL DNDIStateIsBuiltInDND(DNDState *state) {
     if (!state || !state.isActive) return NO;
 
-    NSString *identifier = state.activeModeIdentifier;
+    NSString *identifier = nil;
+    if ([state respondsToSelector:@selector(activeModeIdentifier)]) {
+        identifier = state.activeModeIdentifier;
+    }
     if ([identifier isEqualToString:DNDIDoNotDisturbIdentifier]) return YES;
 
-    NSArray *identifiers = state.activeModeIdentifiers;
+    NSArray *identifiers = nil;
+    if ([state respondsToSelector:@selector(activeModeIdentifiers)]) {
+        identifiers = state.activeModeIdentifiers;
+    }
     return [identifiers isKindOfClass:[NSArray class]] &&
            [identifiers containsObject:DNDIDoNotDisturbIdentifier];
 }
@@ -177,86 +171,62 @@ static void DNDIApplyState(DNDState *state) {
     DNDIUpdateOverlay();
 }
 
-@interface DNDIcon16StateMonitor : NSObject
-@property (nonatomic, strong) DNDStateService *service;
-+ (instancetype)sharedMonitor;
-- (void)start;
-- (void)refreshNow;
-@end
+static UIView *DNDIRootViewFromIconController(SBIconController *controller) {
+    if (!controller || ![controller respondsToSelector:@selector(_rootFolderController)]) return nil;
 
-@implementation DNDIcon16StateMonitor
+    id rootController = nil;
+    @try {
+        rootController = [controller _rootFolderController];
+    } @catch (__unused NSException *exception) {
+        return nil;
+    }
 
-+ (instancetype)sharedMonitor {
-    static DNDIcon16StateMonitor *monitor = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        monitor = [[self alloc] init];
+    if (!rootController || ![rootController respondsToSelector:@selector(view)]) return nil;
+
+    UIView *view = nil;
+    @try {
+        view = [rootController view];
+    } @catch (__unused NSException *exception) {
+        return nil;
+    }
+    return [view isKindOfClass:[UIView class]] ? view : nil;
+}
+
+static DNDStateService *DNDIStateServiceFromIconController(SBIconController *controller) {
+    if (!controller) return nil;
+
+    if ([controller respondsToSelector:@selector(dndStateService)]) {
+        @try {
+            id service = [controller dndStateService];
+            if (service) return service;
+        } @catch (__unused NSException *exception) {
+        }
+    }
+
+    @try {
+        id service = [controller valueForKey:@"_dndStateService"];
+        return service;
+    } @catch (__unused NSException *exception) {
+        return nil;
+    }
+}
+
+static void DNDIRefreshFromIconController(SBIconController *controller) {
+    if (!controller) return;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIView *rootView = DNDIRootViewFromIconController(controller);
+        if (rootView) DNDIEnsureOverlay(rootView);
+
+        DNDStateService *service = DNDIStateServiceFromIconController(controller);
+        if (service && [service respondsToSelector:@selector(queryCurrentStateWithError:)]) {
+            @try {
+                DNDState *state = [service queryCurrentStateWithError:NULL];
+                if (state) DNDIApplyState(state);
+            } @catch (__unused NSException *exception) {
+            }
+        }
     });
-    return monitor;
-}
-
-- (void)start {
-    if (self.service) {
-        [self refreshNow];
-        return;
-    }
-
-    dlopen("/System/Library/PrivateFrameworks/DoNotDisturb.framework/DoNotDisturb", RTLD_LAZY);
-
-    Class serviceClass = NSClassFromString(@"DNDStateService");
-    if (!serviceClass || ![serviceClass respondsToSelector:@selector(serviceForClientIdentifier:)]) return;
-
-    // SpringBoard itself uses this client identifier for its icon-controller DND state service.
-    self.service = [serviceClass serviceForClientIdentifier:@"com.apple.springboard.SBIconController"];
-    if (!self.service) return;
-
-    if ([self.service respondsToSelector:@selector(addStateUpdateListener:withCompletionHandler:)]) {
-        [self.service addStateUpdateListener:self withCompletionHandler:nil];
-    } else if ([self.service respondsToSelector:@selector(addStateUpdateListener:error:)]) {
-        [self.service addStateUpdateListener:self error:NULL];
-    }
-
-    [self refreshNow];
-}
-
-- (void)refreshNow {
-    if (!self.service) return;
-
-    if ([self.service respondsToSelector:@selector(queryCurrentStateWithError:)]) {
-        DNDState *state = [self.service queryCurrentStateWithError:NULL];
-        if (state) DNDIApplyState(state);
-        return;
-    }
-
-    if ([self.service respondsToSelector:@selector(queryCurrentStateWithCompletionHandler:)]) {
-        [self.service queryCurrentStateWithCompletionHandler:^(DNDState *state, NSError *error) {
-            (void)error;
-            if (state) DNDIApplyState(state);
-        }];
-    }
-}
-
-- (void)stateService:(DNDStateService *)service didReceiveDoNotDisturbStateUpdate:(DNDStateUpdate *)update {
-    (void)service;
-    DNDState *state = update.state;
-    if (state) DNDIApplyState(state);
-}
-
-@end
-
-static void DNDIPreferencesChanged(CFNotificationCenterRef center,
-                                   void *observer,
-                                   CFStringRef name,
-                                   const void *object,
-                                   CFDictionaryRef userInfo) {
-    (void)center;
-    (void)observer;
-    (void)name;
-    (void)object;
-    (void)userInfo;
-
-    DNDILoadPrefs();
-    DNDIUpdateOverlay();
 }
 
 static UIView *DNDILockGlyphViewFromRoot(SBUIProudLockIconView *root) {
@@ -283,56 +253,14 @@ static void DNDICaptureLockAnchor(SBUIProudLockIconView *root) {
     DNDIUpdateOverlay();
 }
 
-// SBIconController is an NSObject, not a view controller. v1.0.0 incorrectly
-// tried to attach the overlay through view-controller callbacks on this class.
-// We still hook its native DND update callback as an extra live-state source.
+// Use SpringBoard's own DND refresh path. This avoids registering a second
+// DND service and avoids hooking SBRootFolderView/layoutSubviews, which caused
+// the SpringBoard crash in 1.0.1.
 %hook SBIconController
 
-- (void)stateService:(DNDStateService *)service didReceiveDoNotDisturbStateUpdate:(DNDStateUpdate *)update {
+- (void)updateRootFolderWithCurrentDoNotDisturbState {
     %orig;
-    DNDState *state = update.state;
-    if (state) DNDIApplyState(state);
-}
-
-%end
-
-// The root folder controller/view are the real Home Screen view hierarchy.
-%hook SBRootFolderController
-
-- (void)viewDidLoad {
-    %orig;
-    DNDIEnsureOverlay(self.view);
-    [[DNDIcon16StateMonitor sharedMonitor] refreshNow];
-}
-
-- (void)viewDidAppear:(BOOL)animated {
-    %orig(animated);
-    DNDIEnsureOverlay(self.view);
-    [[DNDIcon16StateMonitor sharedMonitor] refreshNow];
-}
-
-- (void)viewDidLayoutSubviews {
-    %orig;
-    DNDIEnsureOverlay(self.view);
-}
-
-%end
-
-// Direct view hook as a fallback for iOS 16 builds where the controller's
-// lifecycle callbacks differ.
-%hook SBRootFolderView
-
-- (void)didMoveToWindow {
-    %orig;
-    if (self.window) {
-        DNDIEnsureOverlay(self);
-        [[DNDIcon16StateMonitor sharedMonitor] refreshNow];
-    }
-}
-
-- (void)layoutSubviews {
-    %orig;
-    if (self.window) DNDIEnsureOverlay(self);
+    DNDIRefreshFromIconController(self);
 }
 
 %end
@@ -351,6 +279,21 @@ static void DNDICaptureLockAnchor(SBUIProudLockIconView *root) {
 
 %end
 
+static void DNDIPreferencesChanged(CFNotificationCenterRef center,
+                                   void *observer,
+                                   CFStringRef name,
+                                   const void *object,
+                                   CFDictionaryRef userInfo) {
+    (void)center;
+    (void)observer;
+    (void)name;
+    (void)object;
+    (void)userInfo;
+
+    DNDILoadPrefs();
+    DNDIUpdateOverlay();
+}
+
 %ctor {
     @autoreleasepool {
         DNDILoadPrefs();
@@ -362,8 +305,15 @@ static void DNDICaptureLockAnchor(SBUIProudLockIconView *root) {
                                         NULL,
                                         CFNotificationSuspensionBehaviorDeliverImmediately);
 
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [[DNDIcon16StateMonitor sharedMonitor] start];
+        // A short delayed refresh handles SpringBoard launches where the root
+        // folder controller is created just after tweak injection.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            Class cls = NSClassFromString(@"SBIconController");
+            if (cls && [cls respondsToSelector:@selector(sharedInstance)]) {
+                SBIconController *controller = [cls sharedInstance];
+                DNDIRefreshFromIconController(controller);
+            }
         });
     }
 }
