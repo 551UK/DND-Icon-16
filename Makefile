@@ -1,3 +1,4 @@
+# Rootless iOS 16 Dopamine build configuration
 ARCHS = arm64 arm64e
 TARGET = iphone:clang:16.5:16.0
 THEOS_PACKAGE_SCHEME = rootless
