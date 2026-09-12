@@ -1,0 +1,9 @@
+Package: com.551.smartfinalcompat
+Name: Smart Final Compatibility
+Version: 1.0.1
+Architecture: iphoneos-arm64
+Description: Keeps Smart & Final 24.35.8 reporting a current app version on iOS 16.
+Maintainer: 551
+Author: 551
+Section: Tweaks
+Depends: mobilesubstrate, firmware (>= 15.0)
