@@ -1,0 +1,43 @@
+name: Temporary Smart Final compatibility build
+
+on:
+  push:
+    branches: [temp-smartfinal-bypass-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Theos
+        uses: Randomblock1/theos-action@v1
+        with:
+          theos-sdks: https://github.com/theos/sdks
+          theos-sdks-branch: master
+
+      - name: Build rootless package
+        working-directory: smartfinal-build
+        run: make clean package FINALPACKAGE=1
+
+      - name: Validate package
+        run: |
+          set -euo pipefail
+          brew install dpkg
+          debs=(smartfinal-build/packages/*.deb)
+          test "${#debs[@]}" -eq 1
+          test "$(dpkg-deb -f "${debs[0]}" Architecture)" = iphoneos-arm64
+          test "$(dpkg-deb -f "${debs[0]}" Package)" = com.551.smartfinalcompat
+          dpkg-deb -x "${debs[0]}" "$RUNNER_TEMP/smartfinal-check"
+          test -s "$RUNNER_TEMP/smartfinal-check/var/jb/Library/MobileSubstrate/DynamicLibraries/SmartFinalCompatibility.dylib"
+          test -s "$RUNNER_TEMP/smartfinal-check/var/jb/Library/MobileSubstrate/DynamicLibraries/SmartFinalCompatibility.plist"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SmartFinalCompatibility-rootless
+          path: smartfinal-build/packages/*.deb
+          if-no-files-found: error
