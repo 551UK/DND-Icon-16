@@ -311,6 +311,9 @@ static BOOL DNDIIsPlausibleLockAnchor(SBUIProudLockIconView *root, CGPoint point
 }
 
 static void DNDICaptureLockAnchor(SBUIProudLockIconView *root) {
+    // The lock glyph's resting position is fixed for the SpringBoard session.
+    // Do not let layout passes from the unlock animation overwrite it later.
+    if (DNDIHasLockAnchor) return;
     if (!root.window) return;
 
     UIView *glyph = DNDILockGlyphViewFromRoot(root);
@@ -320,15 +323,6 @@ static void DNDICaptureLockAnchor(SBUIProudLockIconView *root) {
     CGPoint point = [glyph convertPoint:center toView:nil];
     if (!isfinite(point.x) || !isfinite(point.y)) return;
     if (!DNDIIsPlausibleLockAnchor(root, point)) return;
-
-    // Once we have a good lock anchor, normal layout changes are only tiny.
-    // A large one-frame jump is the unlock animation moving the lock view and
-    // must not replace the stable anchor used by the Home Screen DND symbol.
-    if (DNDIHasLockAnchor) {
-        CGFloat dx = point.x - DNDILockAnchor.x;
-        CGFloat dy = point.y - DNDILockAnchor.y;
-        if (hypot(dx, dy) > 40.0) return;
-    }
 
     DNDILockAnchor = point;
     DNDIHasLockAnchor = YES;
