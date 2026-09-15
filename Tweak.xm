@@ -287,6 +287,29 @@ static UIView *DNDILockGlyphViewFromRoot(SBUIProudLockIconView *root) {
     }
 }
 
+static BOOL DNDIIsPlausibleLockAnchor(SBUIProudLockIconView *root, CGPoint point) {
+    UIWindow *window = root.window;
+    if (!window) return NO;
+
+    CGRect bounds = window.bounds;
+    CGFloat width = CGRectGetWidth(bounds);
+    CGFloat height = CGRectGetHeight(bounds);
+    if (width <= 0.0 || height <= 0.0) return NO;
+
+    // The Face ID lock glyph lives near the top-centre of the display. During
+    // unlock UIKit can briefly report animation/transition coordinates for it;
+    // never let those transient positions become the Home Screen icon anchor.
+    CGFloat midX = CGRectGetMidX(bounds);
+    CGFloat maxHorizontalDistance = MAX(90.0, width * 0.30);
+    CGFloat maxY = MIN(180.0, height * 0.25);
+
+    if (point.x < CGRectGetMinX(bounds) || point.x > CGRectGetMaxX(bounds)) return NO;
+    if (point.y < CGRectGetMinY(bounds) || point.y > maxY) return NO;
+    if (fabs(point.x - midX) > maxHorizontalDistance) return NO;
+
+    return YES;
+}
+
 static void DNDICaptureLockAnchor(SBUIProudLockIconView *root) {
     if (!root.window) return;
 
@@ -296,6 +319,16 @@ static void DNDICaptureLockAnchor(SBUIProudLockIconView *root) {
     CGPoint center = CGPointMake(CGRectGetMidX(glyph.bounds), CGRectGetMidY(glyph.bounds));
     CGPoint point = [glyph convertPoint:center toView:nil];
     if (!isfinite(point.x) || !isfinite(point.y)) return;
+    if (!DNDIIsPlausibleLockAnchor(root, point)) return;
+
+    // Once we have a good lock anchor, normal layout changes are only tiny.
+    // A large one-frame jump is the unlock animation moving the lock view and
+    // must not replace the stable anchor used by the Home Screen DND symbol.
+    if (DNDIHasLockAnchor) {
+        CGFloat dx = point.x - DNDILockAnchor.x;
+        CGFloat dy = point.y - DNDILockAnchor.y;
+        if (hypot(dx, dy) > 40.0) return;
+    }
 
     DNDILockAnchor = point;
     DNDIHasLockAnchor = YES;
