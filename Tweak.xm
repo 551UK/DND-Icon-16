@@ -178,7 +178,7 @@ static CGPoint DNDIDefaultAnchorForView(UIView *view) {
     // the clear gap below the Dynamic Island and above the first icon row.
     // 92 pt is the visual centre of that gap on the stock 430 x 932 layout.
     if (DNDIIsIPhone14ProMax()) {
-        return CGPointMake(width * 0.5, 104.0);
+        return CGPointMake(width * 0.5, 100.0);
     }
 
     CGFloat topInset = view.window ? view.window.safeAreaInsets.top : view.safeAreaInsets.top;
