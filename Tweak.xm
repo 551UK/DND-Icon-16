@@ -160,8 +160,27 @@ static UIView *DNDIHomeContainerForController(SBIconController *controller) {
     return nil;
 }
 
+static BOOL DNDIIsIPhone14ProMax(void) {
+    CGRect nativeBounds = UIScreen.mainScreen.nativeBounds;
+    CGFloat nativeWidth = MIN(CGRectGetWidth(nativeBounds), CGRectGetHeight(nativeBounds));
+    CGFloat nativeHeight = MAX(CGRectGetWidth(nativeBounds), CGRectGetHeight(nativeBounds));
+
+    // iPhone 14 Pro Max native panel size. Keeping this device-specific means
+    // the existing notch-device/LatchKey positioning remains untouched.
+    return fabs(nativeWidth - 1290.0) < 2.0 &&
+           fabs(nativeHeight - 2796.0) < 2.0;
+}
+
 static CGPoint DNDIDefaultAnchorForView(UIView *view) {
     CGFloat width = CGRectGetWidth(view.bounds);
+
+    // On iPhone 14 Pro Max, place the DND glyph dead-centre horizontally in
+    // the clear gap below the Dynamic Island and above the first icon row.
+    // 92 pt is the visual centre of that gap on the stock 430 x 932 layout.
+    if (DNDIIsIPhone14ProMax()) {
+        return CGPointMake(width * 0.5, 92.0);
+    }
+
     CGFloat topInset = view.window ? view.window.safeAreaInsets.top : view.safeAreaInsets.top;
     CGFloat y = topInset > 24.0 ? topInset + 5.0 : 30.0;
     return CGPointMake(width * 0.5, y);
@@ -176,8 +195,12 @@ static void DNDIUpdateOverlay(void) {
         DNDIIconView.alpha = 1.0;
         DNDIIconView.tintColor = DNDIColor ?: UIColor.whiteColor;
 
-        CGPoint anchor = DNDIHasLockAnchor ? DNDILockAnchor : DNDIDefaultAnchorForView(container);
-        if (DNDIHasLockAnchor) {
+        BOOL use14ProMaxHomeAnchor = DNDIIsIPhone14ProMax();
+        CGPoint anchor = use14ProMaxHomeAnchor
+            ? DNDIDefaultAnchorForView(container)
+            : (DNDIHasLockAnchor ? DNDILockAnchor : DNDIDefaultAnchorForView(container));
+
+        if (!use14ProMaxHomeAnchor && DNDIHasLockAnchor) {
             anchor = [container convertPoint:anchor fromView:nil];
         }
 
