@@ -1,6 +1,6 @@
 Package: com.551.dndicon16
 Name: DND Icon 16
-Version: 1.0.5
+Version: 1.0.6
 Architecture: iphoneos-arm64
 Description: Shows a customisable DND moon-and-cloud icon on the Home Screen with colour and position controls.
 Maintainer: 551
