@@ -9,7 +9,8 @@ DND Icon 16 shows a custom moon, cloud and stars icon on your Home Screen whenev
 - Move the icon left, right, up or down.
 - Enable or disable the tweak.
 - Reset the colour or position.
-- Uses the same default position as the LatchKey lock animation.
+- Uses the same default position as the LatchKey lock animation on notch devices.
+- iPhone 14 Pro Max uses a device-specific centred position below the Dynamic Island and above the first Home Screen icon row.
 - No respring needed for normal changes — just turn Do Not Disturb off and back on once.
 
 Made for rootless iOS 16 on Dopamine.
